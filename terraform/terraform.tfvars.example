@@ -1,0 +1,22 @@
+# Copy to terraform.tfvars and adjust if the defaults in variables.tf don't
+# fit. terraform.tfvars itself is gitignored - every variable already has a
+# working default, so applying with no terraform.tfvars at all is fine.
+
+# aws_region = "ap-northeast-1"
+
+# Narrow this once you know your own IP (`curl ifconfig.me`) instead of
+# leaving the EKS API endpoint open to the world:
+# eks_cluster_endpoint_public_access_cidrs = ["203.0.113.10/32"]
+
+# Cost levers, if you want to scale up later:
+# eks_node_instance_types = ["t3.medium"]
+# eks_node_desired_size   = 1
+# rds_instance_class      = "db.t4g.micro"
+
+# Flip once there's real data in RDS worth keeping across a destroy:
+# rds_skip_final_snapshot = false
+
+# Only needed if the computed default (project name + account ID suffix)
+# collides with an existing bucket you own, or you want cleaner names:
+# raw_bucket_name       = "my-chosen-raw-bucket-name"
+# processed_bucket_name = "my-chosen-processed-bucket-name"
