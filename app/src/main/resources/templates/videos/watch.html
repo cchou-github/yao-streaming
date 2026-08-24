@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <th:block th:replace="~{fragments/layout :: pageHead}"></th:block>
+    <title th:text="${video.title} + ' — yao_streaming'">Watch</title>
+    <style>
+        .player {
+            background: #000;
+            border-radius: .5rem;
+            overflow: hidden;
+            margin-top: 1.25rem;
+            aspect-ratio: 16 / 9;
+        }
+        .player video { width: 100%; height: 100%; display: block; }
+        .notice {
+            background: var(--surface);
+            border: 1px dashed var(--rule);
+            border-radius: .5rem;
+            padding: 2.5rem 1.25rem;
+            text-align: center;
+            margin-top: 1.25rem;
+        }
+        .facts {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .5rem 1.25rem;
+            align-items: center;
+            font-size: .88rem;
+            color: var(--ink-muted);
+            margin-top: .5rem;
+        }
+        .description { margin-top: 1.25rem; white-space: pre-wrap; }
+        .playback-url {
+            margin-top: 1.5rem;
+            font-size: .8rem;
+            color: var(--ink-muted);
+            word-break: break-all;
+        }
+        .playback-url code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+        .error {
+            color: var(--failed);
+            margin-top: .75rem;
+            font-size: .88rem;
+        }
+    </style>
+</head>
+<body>
+<th:block th:replace="~{fragments/layout :: nav}"></th:block>
+
+<main>
+    <h1 th:text="${video.title}">Title</h1>
+    <div class="facts">
+        <span class="badge" th:classappend="${video.status}" th:text="${video.status}">READY</span>
+        <span th:text="${video.uploaderName}">Uploader</span>
+        <span th:text="${video.formattedDuration}">0:00</span>
+    </div>
+
+    <!-- Playable -->
+    <div th:if="${video.playable}">
+        <div class="player">
+            <video id="player" controls playsinline preload="metadata"></video>
+        </div>
+        <p class="error" id="player-error" hidden></p>
+        <p class="playback-url">
+            Source: <code th:text="${video.playbackUrl}">url</code>
+        </p>
+    </div>
+
+    <!-- Not yet playable -->
+    <div class="notice" th:unless="${video.playable}">
+        <p class="muted" th:text="${video.statusMessage}">Not ready.</p>
+        <p th:if="${video.status.name() == 'UPLOADING' or video.status.name() == 'PROCESSING'}">
+            <a th:href="@{/videos/{id}(id=${video.id})}">Refresh</a>
+        </p>
+    </div>
+
+    <p class="description" th:if="${video.description}" th:text="${video.description}">Description</p>
+</main>
+
+<th:block th:if="${video.playable}">
+    <script th:src="@{/vendor/hls.min.js}"></script>
+    <script th:inline="javascript">
+        const source = /*[[${video.playbackUrl}]]*/ '';
+        const video = document.getElementById('player');
+        const error = document.getElementById('player-error');
+
+        function fail(message) {
+            error.hidden = false;
+            error.textContent = message;
+        }
+
+        // Safari plays HLS natively; everyone else needs hls.js to fetch the
+        // manifest and feed segments through Media Source Extensions.
+        if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = source;
+        }
+        else if (window.Hls && Hls.isSupported()) {
+            const hls = new Hls({ enableWorker: true });
+            hls.loadSource(source);
+            hls.attachMedia(video);
+            hls.on(Hls.Events.ERROR, (event, data) => {
+                if (data.fatal) {
+                    fail('Playback failed: ' + data.type + ' (' + data.details + ')');
+                }
+            });
+        }
+        else {
+            fail('This browser cannot play HLS.');
+        }
+    </script>
+</th:block>
+</body>
+</html>
