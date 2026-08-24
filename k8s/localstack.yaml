@@ -1,0 +1,121 @@
+# Kubernetes equivalent of the "localstack" service in docker-compose.yml.
+# Stands in for S3 in this local kind-cluster setup - the real-AWS
+# deployment (k8s/aws/) talks to real S3 directly instead.
+
+# docker-compose mounts ./localstack/init as a bind volume so LocalStack
+# runs 01-create-buckets.sh on startup. Kubernetes has no bind mounts from
+# your machine into a pod (a pod could land on any node), so the script's
+# contents are copied into a ConfigMap instead and mounted from there.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: localstack-init
+data:
+  01-create-buckets.sh: |
+    #!/usr/bin/env bash
+    # Runs inside the LocalStack container once it reports ready.
+    # Creates the VOD buckets so the app never has to create its own infrastructure
+    # (in AWS these are owned by Terraform).
+    set -euo pipefail
+
+    RAW_BUCKET="${RAW_BUCKET:-yao-streaming-raw}"
+    PROCESSED_BUCKET="${PROCESSED_BUCKET:-yao-streaming-processed}"
+
+    for bucket in "$RAW_BUCKET" "$PROCESSED_BUCKET"; do
+      awslocal s3 mb "s3://$bucket" 2>/dev/null || echo "bucket $bucket already exists"
+    done
+
+    # The browser fetches HLS manifests and segments directly, and loads them
+    # cross-origin from the app on :8080, so the raw bucket needs to accept
+    # presigned PUTs from that origin and the processed bucket needs to be readable.
+    awslocal s3api put-bucket-cors --bucket "$RAW_BUCKET" --cors-configuration '{
+      "CORSRules": [{
+        "AllowedHeaders": ["*"],
+        "AllowedMethods": ["PUT", "GET", "HEAD"],
+        "AllowedOrigins": ["*"],
+        "ExposeHeaders": ["ETag"]
+      }]
+    }'
+
+    awslocal s3api put-bucket-cors --bucket "$PROCESSED_BUCKET" --cors-configuration '{
+      "CORSRules": [{
+        "AllowedHeaders": ["*"],
+        "AllowedMethods": ["GET", "HEAD"],
+        "AllowedOrigins": ["*"]
+      }]
+    }'
+
+    # Local-only: lets the browser play processed output without presigning every
+    # segment. The deployed equivalent is CloudFront in front of a private bucket.
+    awslocal s3api put-bucket-policy --bucket "$PROCESSED_BUCKET" --policy "{
+      \"Version\": \"2012-10-17\",
+      \"Statement\": [{
+        \"Effect\": \"Allow\",
+        \"Principal\": \"*\",
+        \"Action\": \"s3:GetObject\",
+        \"Resource\": \"arn:aws:s3:::$PROCESSED_BUCKET/*\"
+      }]
+    }"
+
+    echo "buckets ready: $RAW_BUCKET, $PROCESSED_BUCKET"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: localstack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: localstack
+  template:
+    metadata:
+      labels:
+        app: localstack
+    spec:
+      containers:
+        - name: localstack
+          image: localstack/localstack:3
+          ports:
+            - containerPort: 4566
+          env:
+            - name: SERVICES
+              value: s3,lambda,events
+            - name: DEBUG
+              value: "0"
+          volumeMounts:
+            # defaultMode 0755 makes the mounted file executable — ConfigMap
+            # volumes are read-only and not executable by default.
+            - name: init-scripts
+              mountPath: /etc/localstack/init/ready.d
+          readinessProbe:
+            httpGet:
+              path: /_localstack/health
+              port: 4566
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 10
+      volumes:
+        - name: init-scripts
+          configMap:
+            name: localstack-init
+            defaultMode: 0755
+
+---
+# NodePort (rather than mysql's plain ClusterIP) because the browser also
+# needs to reach this directly, not just other pods — see kind-config.yaml's
+# port mapping for hostPort 4566 -> nodePort 30456.
+apiVersion: v1
+kind: Service
+metadata:
+  name: localstack
+spec:
+  type: NodePort
+  selector:
+    app: localstack
+  ports:
+    - port: 4566
+      targetPort: 4566
+      nodePort: 30456

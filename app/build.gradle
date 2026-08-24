@@ -1,0 +1,105 @@
+plugins {
+	id 'java'
+	id 'jacoco'
+	id 'org.springframework.boot' version '4.1.0'
+	id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'com.yaostreaming'
+version = '0.0.1-SNAPSHOT'
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(25)
+	}
+}
+
+repositories {
+	mavenCentral()
+}
+
+ext {
+	awsSdkVersion = '2.35.9'
+}
+
+/*
+ * Java 25 no longer allows a library to self-attach as a Java agent at runtime.
+ * Mockito's inline mock maker depends on being an agent, so it has to be passed
+ * explicitly to the test JVM via -javaagent (see the test task below).
+ */
+configurations {
+	mockitoAgent {
+		transitive = false
+	}
+}
+
+dependencies {
+	mockitoAgent 'org.mockito:mockito-core'
+	implementation platform("software.amazon.awssdk:bom:${awsSdkVersion}")
+	implementation 'software.amazon.awssdk:s3'
+	// IRSA (real AWS) exchanges a web identity token for credentials via an
+	// internal STS call - WebIdentityTokenCredentialsProvider needs this
+	// module on the classpath to do that, even though no code here calls
+	// STS directly. Never caught locally/in kind: those always use static
+	// AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY env vars instead, which don't
+	// exercise this path at all.
+	implementation 'software.amazon.awssdk:sts'
+	// CloudFrontUtilities' signed-cookie helpers (CloudFrontCookieSigner) -
+	// used only when app.cloudfront.enabled=true (real AWS).
+	implementation 'software.amazon.awssdk:cloudfront'
+	// MediaLiveChannelPool's Start/StopChannel calls - used only when
+	// app.live.enabled=true (real AWS), same pattern as cloudfront above.
+	implementation 'software.amazon.awssdk:medialive'
+	// MediaLiveChannelPool.release's ResetOriginEndpointState call - clears
+	// a slot's leftover MediaPackage content on end-of-stream so the next
+	// claimant's viewers can never be served a previous stream's video.
+	implementation 'software.amazon.awssdk:mediapackagev2'
+	// IvsChannelPool's CreateStreamKey/DeleteStreamKey/StopStream calls -
+	// the browser/WebRTC go-live path's ingest side, used only when
+	// app.ivs.enabled=true (real AWS), same pattern as medialive above.
+	implementation 'software.amazon.awssdk:ivs'
+	implementation 'org.springframework.boot:spring-boot-starter-actuator'
+	implementation 'org.springframework.boot:spring-boot-starter-security'
+	implementation 'org.thymeleaf.extras:thymeleaf-extras-springsecurity6'
+	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+	implementation 'org.springframework.boot:spring-boot-starter-flyway'
+	implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
+	implementation 'org.springframework.boot:spring-boot-starter-validation'
+	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+	implementation 'org.springframework.boot:spring-boot-session'
+	implementation 'org.springframework.session:spring-session-jdbc'
+	implementation 'org.flywaydb:flyway-mysql'
+	runtimeOnly 'com.mysql:mysql-connector-j'
+	testImplementation 'org.springframework.boot:spring-boot-starter-actuator-test'
+	testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
+	testImplementation 'org.springframework.boot:spring-boot-starter-flyway-test'
+	testImplementation 'org.springframework.boot:spring-boot-starter-thymeleaf-test'
+	testImplementation 'org.springframework.boot:spring-boot-starter-validation-test'
+	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+	testImplementation 'org.springframework.boot:spring-boot-resttestclient'
+	testImplementation 'org.springframework.boot:spring-boot-restclient'
+	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+	testImplementation 'org.springframework.boot:spring-boot-starter-security-test'
+	testImplementation 'org.springframework.security:spring-security-test'
+	testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
+	testImplementation 'org.testcontainers:testcontainers-mysql'
+	testImplementation 'org.testcontainers:testcontainers-localstack'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+	useJUnitPlatform()
+	// Resolved in doFirst so the configuration is not resolved at configuration time.
+	doFirst {
+		jvmArgs "-javaagent:${configurations.mockitoAgent.asPath}"
+	}
+	finalizedBy tasks.named('jacocoTestReport')
+}
+
+tasks.named('jacocoTestReport') {
+	dependsOn tasks.named('test')
+	reports {
+		xml.required = true
+		html.required = true
+	}
+}

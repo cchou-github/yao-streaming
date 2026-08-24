@@ -1,0 +1,70 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: streaming
+      MYSQL_USER: streaming
+      MYSQL_PASSWORD: streaming
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  localstack:
+    image: localstack/localstack:3
+    environment:
+      SERVICES: s3,lambda,events
+      DEBUG: 0
+    ports:
+      - "4566:4566"
+    volumes:
+      - localstack-data:/var/lib/localstack
+      - ./localstack/init:/etc/localstack/init/ready.d:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile.dev
+    command: ["./gradlew", "bootRun", "--no-daemon", "--console=plain"]
+    volumes:
+      - ./app:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Survives container recreation, so Gradle is not re-downloaded each time.
+      - gradle-cache:/root/.gradle
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: streaming
+      DB_USER: streaming
+      DB_PASSWORD: streaming
+      AWS_ENDPOINT_URL: http://localstack:4566
+      # Presigned URLs and playback URLs are consumed by the browser, which
+      # reaches LocalStack on the published port rather than the compose network.
+      AWS_PUBLIC_ENDPOINT_URL: http://localhost:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: us-east-1
+      TESTCONTAINERS_HOST_OVERRIDE: host.docker.internal
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+
+volumes:
+  mysql-data:
+  localstack-data:
+  gradle-cache:

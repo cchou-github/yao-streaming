@@ -1,0 +1,94 @@
+# Kubernetes equivalent of the "mysql" service in docker-compose.yml.
+# This local kind-cluster setup runs MySQL as a pod rather than RDS - the
+# real-AWS deployment (k8s/aws/) uses RDS instead, same MySQL image either way.
+
+# ECS analogue: this is the part of a task definition's "secrets" block
+# that pulls from Secrets Manager, except here the values live in the
+# cluster itself rather than an external secret store.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mysql-secret
+type: Opaque
+stringData:
+  MYSQL_ROOT_PASSWORD: root
+  MYSQL_PASSWORD: streaming
+
+---
+# ECS analogue: an EBS volume attached to a task. This claims 1Gi of disk
+# from the cluster so the database survives a pod restart, same job as
+# docker-compose's "mysql-data" named volume.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+# ECS analogue: a Task Definition + Service with desiredCount: 1.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.4
+          ports:
+            - containerPort: 3306
+          env:
+            - name: MYSQL_DATABASE
+              value: streaming
+            - name: MYSQL_USER
+              value: streaming
+          envFrom:
+            - secretRef:
+                name: mysql-secret
+          volumeMounts:
+            - name: mysql-data
+              mountPath: /var/lib/mysql
+          # Same check as docker-compose's healthcheck. Other pods (the app's
+          # initContainer) poll this to know when it's safe to connect.
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - mysqladmin ping -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD"
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 10
+      volumes:
+        - name: mysql-data
+          persistentVolumeClaim:
+            claimName: mysql-data
+
+---
+# ECS analogue: Cloud Map service discovery / an internal ALB target group.
+# Gives other pods a stable DNS name, "mysql", instead of a pod IP that
+# changes every restart.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+spec:
+  selector:
+    app: mysql
+  ports:
+    - port: 3306
+      targetPort: 3306

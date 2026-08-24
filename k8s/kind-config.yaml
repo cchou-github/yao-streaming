@@ -1,0 +1,26 @@
+# Local kind cluster for validating the k8s manifests before any AWS spend.
+# ECS/Fargate analogue: this replaces "a cluster" — kind runs the control
+# plane and worker node as Docker containers on your own machine.
+#
+# extraPortMappings forwards ports from your machine straight into the
+# cluster's one node, the same job docker-compose's "ports:" does. Without
+# this, services inside the cluster are only reachable from other pods.
+#
+# Using 8081/4567 rather than 8080/4566 so this can run alongside your
+# docker-compose stack without a port collision — kind is a separate,
+# occasional validation environment, not a replacement for daily dev.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: yao-streaming
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      # Browser -> app.
+      - containerPort: 30080
+        hostPort: 8081
+        protocol: TCP
+      # Browser -> LocalStack, so presigned upload URLs and playback URLs
+      # resolve from outside the cluster.
+      - containerPort: 30456
+        hostPort: 4567
+        protocol: TCP
