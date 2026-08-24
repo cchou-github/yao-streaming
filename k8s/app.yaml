@@ -1,0 +1,121 @@
+# Kubernetes equivalent of the "app" service in docker-compose.yml, running
+# the production image (app/Dockerfile) rather than the ffmpeg-equipped dev
+# one — this is meant to validate the shape that will eventually go to EKS.
+#
+# One real consequence: this image has no ffmpeg, matching production. A
+# freshly uploaded video will sit in UPLOADING/PROCESSING here, because
+# nothing transcodes it in this kind-cluster setup — that job belongs to
+# the real AWS deployment's Lambda + MediaConvert pipeline, deliberately
+# not replicated here. Videos already marked READY still play back fine,
+# so this is still a real test of the catalogue/watch pages.
+
+# Non-secret configuration. ECS analogue: the plain "environment" list in a
+# task definition (as opposed to the "secrets" list, which is the Secret
+# below).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  DB_HOST: mysql
+  DB_PORT: "3306"
+  DB_NAME: streaming
+  DB_USER: streaming
+  # Internal traffic (app -> LocalStack) uses the in-cluster DNS name.
+  AWS_ENDPOINT_URL: http://localstack:4566
+  # Presigned/playback URLs are handed to the browser, which is outside the
+  # cluster and reaches LocalStack through kind's forwarded port instead.
+  # 4567, not 4566 — see kind-config.yaml for why.
+  AWS_PUBLIC_ENDPOINT_URL: http://localhost:4567
+  AWS_REGION: us-east-1
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secret
+type: Opaque
+stringData:
+  DB_PASSWORD: streaming
+  # LocalStack accepts any access key/secret — these aren't real AWS
+  # credentials — but they're modeled as a Secret anyway since that's the
+  # correct shape for the real AWS deployment, where the equivalent values
+  # are IRSA-issued credentials rather than a static key pair.
+  AWS_ACCESS_KEY_ID: test
+  AWS_SECRET_ACCESS_KEY: test
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+spec:
+  # 2, not 1: this is the entire point of JDBC-backed sessions —
+  # without a shared session store, a second replica would randomly bounce
+  # already-logged-in users back to /login whenever the load balancer routed
+  # them to the pod that didn't create their session.
+  replicas: 2
+  selector:
+    matchLabels:
+      app: app
+  template:
+    metadata:
+      labels:
+        app: app
+    spec:
+      # Kubernetes has no direct equivalent of an ECS task definition's
+      # container "dependsOn" with a healthy-condition. The idiomatic
+      # substitute is an initContainer: it must exit successfully before the
+      # main container starts, so this blocks the app pod from starting
+      # (and failing its DB connection) until MySQL is actually reachable.
+      initContainers:
+        - name: wait-for-mysql
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - until nc -z mysql 3306; do echo waiting for mysql; sleep 2; done
+      containers:
+        - name: app
+          image: yao-streaming-app:kind
+          # Never pull: the image only exists locally, loaded straight into
+          # kind's node via `kind load docker-image` — there's no registry
+          # here to pull from.
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: app-secret
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 40
+            periodSeconds: 10
+
+---
+# NodePort so the browser (outside the cluster) can reach it — see
+# kind-config.yaml's port mapping for hostPort 8080 -> nodePort 30080.
+apiVersion: v1
+kind: Service
+metadata:
+  name: app
+spec:
+  type: NodePort
+  selector:
+    app: app
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30080

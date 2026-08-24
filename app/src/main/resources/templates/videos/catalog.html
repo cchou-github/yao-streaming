@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <th:block th:replace="~{fragments/layout :: pageHead}"></th:block>
+    <title>Catalogue</title>
+    <style>
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+            gap: 1rem;
+            margin-top: 1.5rem;
+            padding: 0;
+            list-style: none;
+        }
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--rule);
+            border-radius: .5rem;
+            padding: .95rem 1.05rem;
+            display: flex;
+            flex-direction: column;
+            gap: .4rem;
+        }
+        .card .title { font-weight: 620; }
+        .card a.title { color: var(--ink); text-decoration: none; }
+        .card a.title:hover { text-decoration: underline; }
+        .card .meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: .5rem;
+            font-size: .82rem;
+            color: var(--ink-muted);
+        }
+        .empty {
+            background: var(--surface);
+            border: 1px dashed var(--rule);
+            border-radius: .5rem;
+            padding: 2.5rem 1.25rem;
+            text-align: center;
+            margin-top: 1.5rem;
+        }
+    </style>
+</head>
+<body>
+<th:block th:replace="~{fragments/layout :: nav}"></th:block>
+
+<main>
+    <h1>Catalogue</h1>
+    <p class="muted">Newest first. Videos become playable once transcoding finishes.</p>
+
+    <div class="empty" th:if="${#lists.isEmpty(videos)}">
+        <p class="muted">Nothing here yet.</p>
+        <p><a th:href="@{/upload}">Upload the first video</a></p>
+    </div>
+
+    <ul class="grid" th:unless="${#lists.isEmpty(videos)}">
+        <li class="card" th:each="video : ${videos}">
+            <a class="title" th:if="${video.playable}"
+               th:href="@{/videos/{id}(id=${video.id})}" th:text="${video.title}">Title</a>
+            <span class="title muted" th:unless="${video.playable}" th:text="${video.title}">Title</span>
+
+            <div class="meta">
+                <span th:text="${video.uploaderName}">Uploader</span>
+                <span th:text="${video.formattedDuration}">0:00</span>
+            </div>
+            <div class="meta">
+                <span class="badge" th:classappend="${video.status}" th:text="${video.status}">READY</span>
+                <a th:if="${!video.playable}" th:href="@{/videos/{id}(id=${video.id})}">details</a>
+            </div>
+        </li>
+    </ul>
+</main>
+</body>
+</html>
