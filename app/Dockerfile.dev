@@ -1,0 +1,29 @@
+# Single-stage image for local development/testing only.
+# Keeps the full JDK, Gradle wrapper, and source in one layer so the
+# container's contents mirror your local checkout. Not used for deployment —
+# see Dockerfile for the slim, multi-stage production image.
+
+FROM eclipse-temurin:25-jdk
+
+# ffmpeg/ffprobe stand in for MediaConvert locally, which LocalStack's free
+# tier does not provide. Deliberately absent from the production image: AWS
+# uses MediaConvert, so shipping an encoder there would be dead weight.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Reuse is opt-in and off by default (Testcontainers won't read an env var for
+# it, only this file) - lets the LocalStack containers VideoStorageTest/
+# FfmpegTranscodePipelineTest start survive across separate `gradlew test`
+# runs instead of paying container-startup cost every time. `docker compose
+# run --rm app` recreates this container on every invocation, so the file has
+# to be baked into the image rather than written at runtime or left on a
+# volume that only covers /root/.gradle.
+RUN echo "testcontainers.reuse.enable=true" > /root/.testcontainers.properties
+
+WORKDIR /workspace
+COPY . .
+RUN chmod +x gradlew
+
+EXPOSE 8080
+CMD ["bash"]
