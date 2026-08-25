@@ -1,0 +1,14 @@
+CREATE TABLE videos (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    description VARCHAR(2000) NULL,
+    status VARCHAR(20) NOT NULL,
+    source_key VARCHAR(1024) NOT NULL,
+    playback_url VARCHAR(1024) NULL,
+    duration_seconds INT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_videos_user FOREIGN KEY (user_id) REFERENCES users (id),
+    CONSTRAINT chk_videos_status CHECK (status IN ('UPLOADING', 'PROCESSING', 'READY', 'FAILED'))
+);

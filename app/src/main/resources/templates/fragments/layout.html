@@ -81,6 +81,8 @@
 <th:block th:fragment="nav">
     <div class="bar">
         <nav>
+            <a th:href="@{/}">Catalogue</a>
+            <a th:href="@{/upload}">Upload</a>
         </nav>
         <nav>
             <span class="who">Signed in as <strong sec:authentication="name">user</strong></span>
